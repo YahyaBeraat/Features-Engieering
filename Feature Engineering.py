@@ -1,16 +1,26 @@
 import numpy as np
 import pandas as pd
+import statsmodels.api as sm
 import seaborn as sns
 import matplotlib
 from matplotlib import pyplot as plt
 matplotlib.use("TkAgg")
-# !pip install missingno
-import missingno as msno
-from datetime import date
-from sklearn.metrics import accuracy_score
-from sklearn.model_selection import train_test_split
-from sklearn.neighbors import LocalOutlierFactor
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder, StandardScaler, RobustScaler
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.metrics import confusion_matrix, accuracy_score, mean_squared_error, r2_score, roc_auc_score, roc_curve, classification_report
+from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.svm import SVC
+from sklearn.neural_network import MLPClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import GradientBoostingClassifier
+from lightgbm import LGBMClassifier
+from sklearn.model_selection import KFold
+from xgboost import XGBClassifier
+
+from warnings import filterwarnings
+filterwarnings('ignore')
 
 pd.set_option('display.max_columns', None)
 pd.set_option('display.max_rows', None)
@@ -20,8 +30,38 @@ pd.set_option('display.width', 500)
 df = pd.read_csv(r"C:\Users\yahya\OneDrive\Masaüstü\Python-Miuul\pythonProject1\Ödevler\7. Hafta Ödeveleri\diabetes-230330-150402\diabetes\diabetes.csv")
 df.head()
 df.info()
+df.describe().T
 
-#Numerik ve kategorik değişkenleri yakalayınız.
+
+#### MODELS
+
+models = []
+
+models.append(("LR", LogisticRegression()))
+models.append(('KNN', KNeighborsClassifier()))
+models.append(('SVR', SVC()))
+models.append(('CART', DecisionTreeClassifier()))
+models.append(('RandomForests', RandomForestClassifier()))
+models.append(('GradientBoosting', GradientBoostingClassifier()))
+models.append(('XGBoost', XGBClassifier()))
+
+
+X = df.drop("Outcome",axis=1)
+y = df["Outcome"]
+
+X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.2,random_state=46)
+
+for name,model in models:
+    mod = model.fit(X_train,y_train)
+    y_pred = mod.predict(X_test)
+    acc = accuracy_score(y_test, y_pred)
+    cvscore = cross_val_score(model, X,y, cv = 10).mean()
+    print("Holdout Method:",end=" ")
+    print(name,acc)
+    print("Cross Val Score",end=" ")
+    print(name,cvscore)
+    print("------------------------------------")
+
 
 def grab_col_names(dataframe, cat_th=10, car_th=20):
     """
@@ -89,11 +129,23 @@ cat_cols, num_cols, cat_but_car = grab_col_names(df)
 #hedef değişkenin numeric sınıflara göre ortalmasını verir.
 def outcome_mean(dataframe,column):
     mean = dataframe.groupby("Outcome")[column].mean()
-    print(mean) #
+    print(mean)
 
 outcome_mean(df,num_cols)
 
-def outlier_thresholds(dataframe, col_name, q1=0.25, q3=0.75):
+nan = ["Glucose","BloodPressure","BMI","SkinThickness","Insulin"]
+
+def zerotonan (dataframe , column):
+
+    dataframe[column] = dataframe[column].replace(0, np.nan)
+
+    return dataframe
+
+df = zerotonan(df, nan)
+
+df.isnull().sum()
+
+def outlier_thresholds(dataframe, col_name, q1=0.05, q3=0.95):
     quartile1 = dataframe[col_name].quantile(q1)
     quartile3 = dataframe[col_name].quantile(q3)
     interquantile_range = quartile3 - quartile1
@@ -128,40 +180,6 @@ def grab_outliers(dataframe, col_name, index=False):
 
 grab_outliers(df, num_cols)
 
-def replace_with_thresholds(dataframe, variable):
-    low_limit, up_limit = outlier_thresholds(dataframe, variable)
-    dataframe.loc[(dataframe[variable] < low_limit), variable] = low_limit
-    dataframe.loc[(dataframe[variable] > up_limit), variable] = up_limit
-
-for col in num_cols:
-    replace_with_thresholds(df, col)
-
-
-for col in num_cols:
-    print(col, check_outlier(df, col))
-
-
-
-## Eksik Değer Kontrolü
-
-
-
-df.isna().sum()
-
-
-df[df["Insulin"] == 0]["Insulin"].count()
-
-nan = ["Glucose","BloodPressure","BMI","SkinThickness","Insulin"]
-
-
-def zerotonan (dataframe , column):
-
-    dataframe[column] = dataframe[column].replace(0, np.nan)
-
-    return dataframe
-
-df = zerotonan(df, nan)
-
 def missing_values_table(dataframe, na_name=False):
     na_columns = [col for col in dataframe.columns if dataframe[col].isnull().sum() > 0]
 
@@ -173,13 +191,8 @@ def missing_values_table(dataframe, na_name=False):
     if na_name:
         return na_columns
 
-
-missing_values_table(df)
-
-msno.bar(df)
-plt.show()
-
 na_cols = missing_values_table(df, True)
+
 
 
 def missing_vs_target(dataframe, target, na_columns):
@@ -198,86 +211,74 @@ def missing_vs_target(dataframe, target, na_columns):
 missing_vs_target(df, "Outcome", na_cols)
 
 
-cat_cols, num_cols, cat_but_car = grab_col_names(df)
+naValues = ["Glucose","BloodPressure","SkinThickness","Insulin","BMI"]
 
-dff = pd.get_dummies(df[cat_cols + num_cols], drop_first=True)
-
-dff.head()
-
-scaler = MinMaxScaler()
-dff = pd.DataFrame(scaler.fit_transform(dff), columns=dff.columns)
-dff.head()
+for i in naValues:
+    df[i][(df[i].isnull()) & (df["Outcome"] == 0)] = df[i][(df[i].isnull()) & (df["Outcome"] == 0)].fillna(df[i][df["Outcome"] == 0].mean())
+    df[i][(df[i].isnull()) & (df["Outcome"] == 1)] = df[i][(df[i].isnull()) & (df["Outcome"] == 1)].fillna(df[i][df["Outcome"] == 1].mean())
 
 
-from sklearn.impute import KNNImputer
-imputer = KNNImputer(n_neighbors=5)
-dff = pd.DataFrame(imputer.fit_transform(dff), columns=dff.columns)
-dff.head()
+def replace_with_thresholds(dataframe, variable):
+    low_limit, up_limit = outlier_thresholds(dataframe, variable)
+    dataframe.loc[(dataframe[variable] < low_limit), variable] = low_limit
+    dataframe.loc[(dataframe[variable] > up_limit), variable] = up_limit
 
-dff = pd.DataFrame(scaler.inverse_transform(dff), columns=dff.columns)
+for col in num_cols:
+    replace_with_thresholds(df, col)
 
-df["Insulin_imputed_knn"] = dff[["Insulin"]]
+for col in num_cols:
+    print(col, check_outlier(df, col))
 
-df["SkinThickness_imputed_knn"]  = dff[["SkinThickness"]]
 
-df.drop(columns=["age_imputed_knn"], inplace=True)
+corr_matrix = df.corr()
 
-df.loc[df["Insulin"].isnull(), ["Insulin", "Insulin_imputed_knn"]]
+plt.figure(figsize=(10, 8))
+sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", linewidths=0.5)
+plt.title("Korelasyon Matrisi")
+plt.show()
 
-df["Insulin"].mean()
+df['BMIRanges'] = pd.cut(x=df['BMI'], bins=[0,18.5,25,30,100],labels = ["Underweight","Healthy","Overweight","Obese"])
 
-df["Insulin_imputed_knn"].mean()
+df['InsulinRanges'] = pd.cut(x=df['Insulin'], bins=[0, 16, 100, 200, 900], labels=["Low", "Normal", "High", "Very High"])
 
-df["SkinThickness"].mean()
-
-df["SkinThickness_imputed_knn"].mean()
+df['NewGlucose'] = pd.cut(x=df['Glucose'], bins=[0,70,99,126,200],labels = ["Low","Normal","Secret","High"])
 
 df.head()
-
-
-
-df.loc[(df['BMI'] <= 18.5), 'Weight'] = 'Underweight'
-
-df.loc[(df['BMI'] > 18.5) & (df['BMI'] <= 24.9), 'Weight'] = 'Healthy Weight'
-
-df.loc[(df['BMI'] > 24.9) & (df['BMI'] <= 29.9), 'Weight'] = 'Overweight'
-
-df.loc[(df['BMI'] > 29.9) & (df['BMI'] <= 34.9), 'Weight'] = '1st Degree Obese'
-
-df.loc[(df['BMI'] > 34.9) & (df['BMI'] <=  39.9), 'Weight'] = '2nd Degree Obese'
-
-df.loc[(df['BMI'] > 40), 'Weight'] = 'Morbid Obese'
-
-df.head()
-
-df.loc[(df['Age'] <= 21), 'Age_Class'] = 'young'
-
-df.loc[(df['Age'] > 21) & (df['Age'] < 50), 'Age_Class'] = 'mature'
-
-df.loc[(df['Age'] >= 50), 'Age_Class'] = 'senior'
-
-
-
 
 def one_hot_encoder(dataframe, categorical_cols, drop_first=True):
     dataframe = pd.get_dummies(dataframe, columns=categorical_cols, drop_first=drop_first, dtype=int)
     return dataframe
 
-
 ohe_cols = [col for col in df.columns if 10 >= df[col].nunique() > 2]
 df = one_hot_encoder(df, ohe_cols)
-df.head()
 
-scaler = StandardScaler()
+scaler = RobustScaler()
 df[num_cols] = scaler.fit_transform(df[num_cols])
 
+models = []
+
+models.append(("LR", LogisticRegression()))
+models.append(('KNN', KNeighborsClassifier()))
+models.append(('SVR', SVC()))
+models.append(('CART', DecisionTreeClassifier()))
+models.append(('RandomForests', RandomForestClassifier()))
+models.append(('GradientBoosting', GradientBoostingClassifier()))
+models.append(('XGBoost', XGBClassifier()))
+
+
+
+X = df.drop("Outcome",axis=1)
 y = df["Outcome"]
-X = df.drop("Outcome", axis=1)
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.30, random_state=17)
+X_train, X_test, y_train, y_test = train_test_split(X,y,test_size=0.2,random_state=46)
 
-from sklearn.ensemble import RandomForestClassifier
-
-rf_model = RandomForestClassifier(random_state=46).fit(X_train, y_train)
-y_pred = rf_model.predict(X_test)
-accuracy_score(y_pred, y_test)
+for name,model in models:
+    mod = model.fit(X_train,y_train) #trainleri modele fit etmek
+    y_pred = mod.predict(X_test) # tahmin
+    acc = accuracy_score(y_test, y_pred) #rmse hesabı
+    cvscore = cross_val_score(model, X,y, cv = 10).mean()
+    print("Holdout Method:",end=" ")
+    print(name,acc) #yazdırılacak kısım
+    print("Cross Val Score",end=" ")
+    print(name,cvscore)
+    print("------------------------------------")
